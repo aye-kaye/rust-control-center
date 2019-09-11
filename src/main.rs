@@ -1,8 +1,10 @@
 use structopt::StructOpt;
 
+use cli_gen::generator::gen_cfg;
+
 
 #[derive(StructOpt, Debug)]
-pub enum RunMode2 {
+pub enum RunMode {
     /// Generate terminal configuration files
     Generate {
         /// List of warehouse IDs
@@ -21,13 +23,21 @@ pub enum RunMode2 {
 }
 
 #[derive(StructOpt, Debug)]
-struct Opt {
+pub struct Opt {
     /// Program run mode. Either 'Generate' or 'TestReports' are allowed
     #[structopt(subcommand)]  // Note that we mark a field as a subcommand
-    mode: RunMode2
+    pub mode: RunMode
 }
 
 fn main() {
     let opt = Opt::from_args();
     println!("{:?}", opt);
+    match opt.mode {
+        RunMode::Generate { warehouse_id_list, terminal_count } => {
+            gen_cfg(warehouse_id_list, terminal_count);
+        },
+        RunMode::TestReport { reports } => {
+            println!("TestReport not implemented");
+        }
+    }
 }
