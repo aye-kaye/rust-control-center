@@ -14,6 +14,10 @@ pub enum RunMode {
         /// Generate configuration for this many terminals
         #[structopt(short, long)]
         terminal_count: u32,
+
+        /// Number of transactions per terminal
+        #[structopt(short, long)]
+        transaction_count: u32,
     },
     /// Build test reports
     TestReport {
@@ -24,7 +28,7 @@ pub enum RunMode {
 
 #[derive(StructOpt, Debug)]
 pub struct Opt {
-    /// Program run mode. Either 'Generate' or 'TestReports' are allowed
+    /// Program run mode. Either 'generate' or 'testreports' are allowed
     #[structopt(subcommand)]  // Note that we mark a field as a subcommand
     pub mode: RunMode
 }
@@ -33,8 +37,8 @@ fn main() {
     let opt = Opt::from_args();
     println!("{:?}", opt);
     match opt.mode {
-        RunMode::Generate { warehouse_id_list, terminal_count } => {
-            gen_cfg(warehouse_id_list, terminal_count);
+        RunMode::Generate { warehouse_id_list, terminal_count, transaction_count } => {
+            gen_cfg(warehouse_id_list, terminal_count, transaction_count);
         },
         RunMode::TestReport { reports } => {
             println!("TestReport not implemented");
