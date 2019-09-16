@@ -10,7 +10,7 @@ pub struct TermControlCfg {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TransactionParams {
     pub typ: TransactionType,
-    pub key_time_ms: u32,
+    pub keying_time_ms: u32,
     pub think_time_ms: u32,
     pub is_rbk: bool,
 }
