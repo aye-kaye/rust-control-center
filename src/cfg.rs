@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TermControlCfg {
@@ -9,6 +9,7 @@ pub struct TermControlCfg {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TransactionParams {
+    #[serde(rename(serialize = "type"))]
     pub typ: TransactionType,
     pub keying_time_ms: u32,
     pub think_time_ms: u32,
