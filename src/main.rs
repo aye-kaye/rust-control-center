@@ -8,7 +8,7 @@ pub enum RunMode {
     /// Generate terminal configuration files
     Generate {
         /// List of warehouse IDs
-        #[structopt(short, long)]
+        #[structopt(short = "w", long)]
         warehouse_id_list: Vec<u32>,
 
         /// Generate configuration for this many terminals
