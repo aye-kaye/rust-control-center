@@ -20,7 +20,7 @@ pub struct TransactionParams {
 pub enum TransactionType {
     NewOrder,
     Payment,
-    Status,
+    OrderStatus,
     Delivery,
-    Threshold,
+    StockLevel,
 }

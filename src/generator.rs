@@ -1,17 +1,19 @@
-extern crate chrono;
-extern crate rayon;
+extern crate rand;
 
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
+use chrono::{DateTime, Local};
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{thread_rng, Rng, SeedableRng};
+use rayon::prelude::*;
 
 use crate::cfg::*;
-
-use self::chrono::{DateTime, Local};
+use crate::terminal::*;
+use rand::seq::SliceRandom;
+use rand_distr::{Distribution, Poisson};
 
 pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_count: u32) -> () {
     if warehouse_id_list.len() == 0 {
@@ -64,6 +66,78 @@ pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_cou
         });
 }
 
+/// Generate sample log files with fixed deck size and configurable terminal count and iteration count
+pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
+    if terminal_count == 0 {
+        panic!("Terminal count must be more than 0");
+    }
+    if iteration_count == 0 {
+        panic!("Iteration count must be more than 0");
+    }
+
+    const TRANSACTION_COUNT: u32 = 100;
+
+    let now: DateTime<Local> = Local::now();
+    let start_ts = now.format("%Y%m%d_%H%M%S");
+
+    (0..terminal_count)
+        .collect::<Vec<u32>>()
+        .par_iter_mut()
+        .for_each(|t| {
+            let log_file_name = format!("{}_T{}.csv", start_ts, t);
+            let mut wtr = csv::Writer::from_path(&log_file_name).unwrap();
+
+            let tx_bkdwn = tx_breakdown(TRANSACTION_COUNT);
+
+            // Initialize deck with the generated distribution of transaction types
+            let mut deck: Vec<TransactionType> = tx_bkdwn
+                .iter()
+                .map(|(tx_type, tx_def)| {
+                    (0..tx_def.tx_count)
+                        .collect::<Vec<u32>>()
+                        .iter()
+                        .map(|_| tx_type.clone())
+                        .collect()
+                })
+                .flat_map(|t_t: Vec<TransactionType>| t_t)
+                .collect();
+            let deck_slice: &mut [TransactionType] = &mut deck;
+
+            let mut rng = thread_rng();
+
+            let poi = Poisson::new(2.0).unwrap();
+
+            (0..iteration_count)
+                .collect::<Vec<u32>>()
+                .iter()
+                .for_each(|_| {
+                    deck_slice.shuffle(&mut rng);
+
+                    deck_slice
+                        .iter()
+                        .cloned()
+                        .for_each(|tx_type: TransactionType| {
+                            let tx_def = tx_bkdwn.get(&tx_type).unwrap();
+                            let mut rt_smpl: f64 = poi.sample(&mut rng);
+                            rt_smpl *= 1_000.0;
+
+                            wtr.serialize(TermLogRecord {
+                                time_started: 1,
+                                typ: tx_type.clone(),
+                                running_time: rt_smpl as u32,
+                                tx_running_time: 15,
+                                think_time_ms: tx_def.think_time_ms,
+                                is_rbk: false,
+                            })
+                            .expect(&format!(
+                                "Error writing sample record to the file {}",
+                                &log_file_name
+                            ));
+                        });
+                });
+        });
+}
+
 struct TransactionDefaults {
     tx_count: u32,
     keying_time_ms: u32,
@@ -84,7 +158,7 @@ fn tx_breakdown(transaction_count: u32) -> HashMap<TransactionType, TransactionD
         },
     );
     map.insert(
-        TransactionType::Status,
+        TransactionType::OrderStatus,
         TransactionDefaults {
             tx_count: fraction_non_zero(tc_f64, 0.04),
             keying_time_ms: 2_000,
@@ -102,7 +176,7 @@ fn tx_breakdown(transaction_count: u32) -> HashMap<TransactionType, TransactionD
         },
     );
     map.insert(
-        TransactionType::Threshold,
+        TransactionType::StockLevel,
         TransactionDefaults {
             tx_count: fraction_non_zero(tc_f64, 0.04),
             keying_time_ms: 2_000,
