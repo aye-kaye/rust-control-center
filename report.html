@@ -26,12 +26,12 @@
 			  series: [
 				{
 				   name: "Average",
-				   data: [[new_order.tx_rt_mean, 0], [new_order.tx_rt_mean, 4000]],
+				   data: [[new_order.tx_rt_mean, 0], [new_order.tx_rt_mean, new_order.tx_rt_high]],
 				   type: "line"
 				},
 				{
 				   name: "90-th Percentile",
-				   data: [[new_order.tx_rt_p90, 0], [new_order.tx_rt_p90, 4000]],
+				   data: [[new_order.tx_rt_p90, 0], [new_order.tx_rt_p90, new_order.tx_rt_high]],
 				   type: "line"
 				},
 				{
