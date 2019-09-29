@@ -6,7 +6,7 @@ use std::fs;
 
 use chrono::{DateTime, Local};
 use itertools::Itertools;
-use rand::rngs::StdRng;
+use rand::rngs::{SmallRng, StdRng};
 use rand::{thread_rng, Rng, SeedableRng};
 use rayon::prelude::*;
 
@@ -104,8 +104,10 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
             let deck_slice: &mut [TransactionType] = &mut deck;
 
             let mut rng = thread_rng();
-
+            let mut small_rng = SmallRng::from_entropy();
             let poi = Poisson::new(2.0).unwrap();
+
+            let mut term_running_time = Local::now().timestamp() as u64;
 
             (0..iteration_count)
                 .collect::<Vec<u32>>()
@@ -118,21 +120,31 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
                         .cloned()
                         .for_each(|tx_type: TransactionType| {
                             let tx_def = tx_bkdwn.get(&tx_type).unwrap();
-                            let mut rt_smpl: f64 = poi.sample(&mut rng);
-                            rt_smpl *= 1_000.0;
+
+                            let keying_time = tx_def.keying_time_ms;
+
+                            let mut tx_rt_smpl_f: f64 = poi.sample(&mut rng);
+                            tx_rt_smpl_f += 1.;
+                            let rt_smpl_f: f64 = tx_rt_smpl_f * rng.gen_range(1.05, 1.15);
+                            let tx_rt_smpl = (tx_rt_smpl_f * 1000.) as u32;
+                            let rt_smpl = (rt_smpl_f * 1000.) as u32;
+
+                            let think_time = tx_def.think_time_ms;
 
                             wtr.serialize(TermLogRecord {
-                                time_started: 1,
+                                time_started: term_running_time,
                                 typ: tx_type.clone(),
-                                running_time: rt_smpl as u32,
-                                tx_running_time: 15,
-                                think_time_ms: tx_def.think_time_ms,
+                                running_time: rt_smpl,
+                                tx_running_time: tx_rt_smpl,
+                                think_time_ms: think_time,
                                 is_rbk: false,
                             })
                             .expect(&format!(
                                 "Error writing sample record to the file {}",
                                 &log_file_name
                             ));
+
+                            term_running_time += (keying_time + rt_smpl + think_time) as u64;
                         });
                 });
         });

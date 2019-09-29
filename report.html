@@ -1,0 +1,73 @@
+<head>
+
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+<script>
+	function loadChart() {
+		var data = {
+			"tx_rt_data_new_order" : {
+				"tx_rt_series" : []
+			}
+		};
+		var xhr = new XMLHttpRequest();		
+		xhr.open("GET", "data.json", true);
+		xhr.overrideMimeType("application/json");
+		xhr.onload = function() {
+			data = JSON.parse(xhr.responseText);
+			
+			var new_order = data.tx_rt_data_new_order;
+
+			var options = {
+			  chart: {
+				height: 380,
+				width: "100%"
+			  },
+			  colors: ['#267726', '#A86CD5', '#2DA5F4'],
+			  series: [
+				{
+				   name: "Average",
+				   data: [[new_order.tx_rt_mean, 0], [new_order.tx_rt_mean, 4000]],
+				   type: "line"
+				},
+				{
+				   name: "90-th Percentile",
+				   data: [[new_order.tx_rt_p90, 0], [new_order.tx_rt_p90, 4000]],
+				   type: "line"
+				},
+				{
+				  name: "NewOrder",
+				  data: new_order.tx_rt_series,
+				  type: "line"
+				}
+			  ],
+			  tooltip: {
+				x: {
+				  formatter: function(val) {
+					return val.toFixed(1);
+				  }
+				}
+			  },
+			  dataLabels: {
+				enabled: true,
+				style: {
+					colors: ['#333']
+				},
+				offsetX: 0
+			  }
+			};
+
+
+			var chart = new ApexCharts(
+				document.querySelector("#chart"),
+				options
+			);
+
+			chart.render();
+		}
+		xhr.send();
+	}
+</script>
+</head>
+<body onload="loadChart();">
+  <div id="chart"></div>
+</body>

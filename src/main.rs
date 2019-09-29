@@ -1,7 +1,14 @@
+use std::path::Path;
+use std::time::Duration;
+
+use humantime::parse_duration;
 use structopt::StructOpt;
+
+use glob::glob;
 
 mod cfg;
 mod generator;
+mod reporting;
 mod terminal;
 
 #[derive(StructOpt, Debug)]
@@ -23,7 +30,11 @@ pub enum RunMode {
     /// Build test reports
     TestReport {
         #[structopt(short, long)]
-        reports: Vec<String>,
+        log_files_glob: String,
+        #[structopt(short = "b", long, parse(try_from_str = parse_duration))]
+        steady_begin_offset: Duration,
+        #[structopt(short = "e", long, parse(try_from_str = parse_duration))]
+        steady_end_offset: Duration,
     },
     /// Generate sample log files
     SampleLogFiles {
@@ -54,8 +65,23 @@ fn main() {
         } => {
             generator::gen_cfg(warehouse_id_list, terminal_count, transaction_count);
         }
-        RunMode::TestReport { reports } => {
-            println!("TestReport not implemented");
+        RunMode::TestReport {
+            log_files_glob,
+            steady_begin_offset,
+            steady_end_offset,
+        } => {
+            let mut log_files_paths: Vec<String> = Vec::new();
+            for entry in glob(&log_files_glob).expect("Failed to read glob pattern") {
+                match entry {
+                    Ok(path) => {
+                        if let Some(path_str) = path.to_str() {
+                            log_files_paths.push(path_str.to_string())
+                        }
+                    }
+                    Err(e) => println!("{:?}", e),
+                }
+            }
+            reporting::build_reports(&log_files_paths, steady_begin_offset, steady_end_offset);
         }
         RunMode::SampleLogFiles {
             terminal_count,
