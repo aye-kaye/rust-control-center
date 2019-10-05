@@ -17,33 +17,51 @@
 			
 			var new_order = data.tx_rt_data_new_order;
 
-			var options = {
+			var tx_rt_options = {
 			  chart: {
 				height: 380,
 				width: "100%"
 			  },
-			  colors: ['#267726', '#A86CD5', '#2DA5F4'],
+			  colors: ['#2DA5F4'],
 			  series: [
-				{
-				   name: "Average",
-				   data: [[new_order.tx_rt_mean, 0], [new_order.tx_rt_mean, new_order.tx_rt_high]],
-				   type: "line"
-				},
-				{
-				   name: "90-th Percentile",
-				   data: [[new_order.tx_rt_p90, 0], [new_order.tx_rt_p90, new_order.tx_rt_high]],
-				   type: "line"
-				},
 				{
 				  name: "NewOrder",
 				  data: new_order.tx_rt_series,
 				  type: "line"
 				}
 			  ],
+			  annotations: {
+				xaxis: [
+				  {
+					x: new_order.tx_rt_mean,
+					borderColor: "#2DA5F4",
+					label: {
+					  borderWidth: 0,
+					  style: {
+						color: "#2DA5F4",
+						background: "rgba(255, 255, 255, 0.8)"
+					  },
+					  text: "Average = " + (new_order.tx_rt_mean / 1000).toFixed(1)
+					}
+				  },
+				  {
+					x: new_order.tx_rt_p90,
+					borderColor: "#2DA5F4",					
+					label: {
+					  borderWidth: 0,
+					  style: {
+						color: "#2DA5F4",
+						background: "rgba(255, 255, 255, 0.8)"
+					  },
+					  text: "90-th Percentile = " + (new_order.tx_rt_p90 / 1000).toFixed(1)
+					}
+				  }
+				]
+			  },
 			  tooltip: {
 				x: {
 				  formatter: function(val) {
-					return val.toFixed(1);
+					return (val / 1000).toFixed(1);
 				  }
 				}
 			  },
@@ -53,21 +71,98 @@
 					colors: ['#333']
 				},
 				offsetX: 0
+			  },
+			  xaxis: {
+				labels: {
+					formatter: function (val) {
+					  return (val / 1000).toFixed(1);
+					}
+				}
+			  }
+			};
+			
+			
+			var tpm_new_order = data.throughput_data_new_order;
+			var tpm_options = {
+			  chart: {
+				height: 380,
+				width: "100%"
+			  },
+			  colors: ['#2DA5F4'],
+			  series: [
+				{
+				  name: "NewOrder",
+				  data: tpm_new_order.tpm_series,
+				  type: "line"
+				}
+			  ],
+			  annotations: {
+				xaxis: [
+				  {
+					x: tpm_new_order.steady_begin_time,
+					borderColor: "#00E396",
+					label: {
+					  //borderColor: "#00E396",
+					  borderWidth: 0,
+					  style: {
+						color: "#00E396",
+						background: "rgba(255, 255, 255, 0.8)"
+					  },
+					  text: "Steady Started = " + (tpm_new_order.steady_begin_time / 1000).toFixed(0)
+					}
+				  },
+				  {
+					x: tpm_new_order.steady_end_time,
+					borderColor: "#00E396",					
+					label: {
+					  //borderColor: "#00E396",
+					  borderWidth: 0,
+					  style: {
+						color: "#00E396",
+						background: "rgba(255, 255, 255, 0.8)"
+					  },
+					  text: "Steady Finished = " + (tpm_new_order.steady_end_time / 1000).toFixed(0)
+					}
+				  }
+				]
+			  },	
+			  tooltip: {
+				x: {
+				  formatter: function(val) {
+					return (val / 1000).toFixed(0);
+				  }
+				}
+			  },
+			  xaxis: {
+				labels: {
+					formatter: function (val) {
+					  return (val / 1000).toFixed(0);
+					}
+				}
 			  }
 			};
 
 
-			var chart = new ApexCharts(
-				document.querySelector("#chart"),
-				options
+			var tx_rt_chart = new ApexCharts(
+				document.querySelector("#tx_rt_chart"),
+				tx_rt_options
 			);
 
-			chart.render();
+			tx_rt_chart.render();
+
+			var tpm_chart = new ApexCharts(
+				document.querySelector("#tpm_chart"),
+				tpm_options
+			);
+
+			tpm_chart.render();
 		}
 		xhr.send();
 	}
 </script>
 </head>
 <body onload="loadChart();">
-  <div id="chart"></div>
+  <div id="tx_rt_chart"></div>
+  <div style="padding: 20px" />
+  <div id="tpm_chart"></div>
 </body>

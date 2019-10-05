@@ -7,13 +7,13 @@ use std::fs;
 use chrono::{DateTime, Local};
 use itertools::Itertools;
 use rand::rngs::{SmallRng, StdRng};
+use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, SeedableRng};
+use rand_distr::{Distribution, Poisson};
 use rayon::prelude::*;
 
 use crate::cfg::*;
 use crate::terminal::*;
-use rand::seq::SliceRandom;
-use rand_distr::{Distribution, Poisson};
 
 pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_count: u32) -> () {
     if warehouse_id_list.len() == 0 {

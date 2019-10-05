@@ -27,6 +27,7 @@ pub struct TermGroupParams {
 #[derive(Serialize, Debug)]
 pub struct ReportingData {
     tx_rt_data_new_order: TxRtData,
+    throughput_data_new_order: ThroughputData,
 }
 
 #[derive(Serialize, Debug)]
@@ -37,6 +38,14 @@ pub struct TxRtData {
     tx_rt_max: u64,
     tx_rt_high: u64,
     tx_rt_series: Vec<[u64; 2]>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct ThroughputData {
+    tx_type: TransactionType,
+    steady_begin_time: u64,
+    steady_end_time: u64,
+    tpm_series: Vec<[u64; 2]>,
 }
 
 struct FreqDistr {
@@ -194,14 +203,13 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
             thread::spawn(move || {
                 while let Steal::Success(file) = st.steal() {
                     let mut rdr = csv::Reader::from_path(&file).unwrap();
+                    let mut record: TermLogRecord;
                     for result in rdr.deserialize() {
-                        let record: TermLogRecord = result.unwrap();
+                        record = result.unwrap();
                         sr.send(record).unwrap();
                     }
-                    //                    println!("file processed {}", &file);
                 }
                 b.wait();
-                //                println!("freed {:?}", thread::current().id());
             });
         })
         .collect::<()>();
@@ -218,8 +226,10 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
 
     const TX_COUNT_SAMPLING_INTERVAL_SEC: u64 = 30;
     const TX_COUNT_SAMPLING_INTERVAL_MSEC: u64 = TX_COUNT_SAMPLING_INTERVAL_SEC * 1000;
+    const TX_COUNT_SAMPLING_INTERVAL_MSEC_F: f64 = TX_COUNT_SAMPLING_INTERVAL_MSEC as f64;
 
-    let mut fqd_new_order: FreqDistr = FreqDistr::new();
+    const TPM_SAMPLING_INTERVAL_SEC: u64 = 60;
+    const TPM_SAMPLING_INTERVAL_MSEC: u64 = TPM_SAMPLING_INTERVAL_SEC * 1000;
 
     let earliest_start_time_ms: &u64 = &group_params.earliest_start_time_ms;
     let latest_start_time_ms: &u64 = &group_params.latest_start_time_ms;
@@ -237,10 +247,17 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
     loop {
         match receiver.recv() {
             Ok(record) => {
-                let record_time = record.time_started;
+                let cycle_start_time = record.time_started;
+                //TODO суммировать остальные части: keying_time + menu_time
+                let cycle_finish_time =
+                    cycle_start_time + record.running_time as u64 + record.think_time_ms as u64;
 
                 // Gathering metrics within steady interval
-                if record_time >= *steady_begin_time_ms && record_time < *steady_end_time_ms {
+                if cycle_start_time >= *steady_begin_time_ms
+                    && cycle_start_time < *steady_end_time_ms
+                    && cycle_finish_time >= *steady_begin_time_ms
+                    && cycle_finish_time < *steady_end_time_ms
+                {
                     let tx_interval_value =
                         libm::ceil(record.tx_running_time as f64 / TX_SAMPLING_INTERVAL_MSEC_F)
                             as u64
@@ -269,33 +286,60 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                         }
                     };
                 }
-                // TODO append total iteration time
-                let tx_cnt_interval_num =
-                    (record_time - *earliest_start_time_ms) / TX_COUNT_SAMPLING_INTERVAL_MSEC;
-                txsg.new_order.tx_cnt_histo.record(tx_cnt_interval_num);
+                let tx_cnt_interval_num = libm::ceil(
+                    (cycle_finish_time - *earliest_start_time_ms) as f64
+                        / TX_COUNT_SAMPLING_INTERVAL_MSEC_F,
+                ) as u64
+                    * TX_COUNT_SAMPLING_INTERVAL_MSEC;
+                if let TransactionType::NewOrder = record.typ {
+                    txsg.new_order.tx_cnt_histo.record(tx_cnt_interval_num);
+                }
             }
             Err(RecvError) => {
                 println!("Done");
 
                 const TX_RT_INTERVAL_COUNT: u64 = 20;
+
                 //              New Order
-                let p90 = txsg.new_order.tx_rt_histo.value_at_percentile(90.); //txsg.new_order.fqd.quantile() as u64;
+                let p90 = txsg.new_order.tx_rt_histo.value_at_percentile(90.);
                 let mut high = 0;
                 let tx_rt_4 = p90 * 4;
                 let tx_rt_interval_size = tx_rt_4 / TX_RT_INTERVAL_COUNT;
-                let mut tx_rt_series: Vec<[u64; 2]> = (1..TX_RT_INTERVAL_COUNT + 1)
+                let tx_rt_series: Vec<[u64; 2]> = (1..TX_RT_INTERVAL_COUNT + 1)
                     .map(|i| {
                         let value = i * tx_rt_interval_size;
                         let count = txsg
                             .new_order
                             .tx_rt_histo
-                            .count_between((i - 1) * tx_rt_interval_size, value);
+                            .count_between((i - 1) * tx_rt_interval_size + 1, value);
                         high = max(high, count);
                         [value, count]
                     })
                     .collect();
 
-                let mut new_order_data = TxRtData {
+                let total_running_time_ms = txsg.new_order.tx_cnt_histo.max();
+                println!(
+                    "Total running time {}",
+                    humantime::format_duration(Duration::new(total_running_time_ms / 1000, 0))
+                );
+                let tx_count_interval_count =
+                    total_running_time_ms / TX_COUNT_SAMPLING_INTERVAL_MSEC;
+                let tpm_series = (1..tx_count_interval_count + 1)
+                    .map(|i| {
+                        let value = i * TX_COUNT_SAMPLING_INTERVAL_MSEC;
+                        let lower_tpm_bound = match value.cmp(&TPM_SAMPLING_INTERVAL_MSEC) {
+                            Ordering::Greater => value - TPM_SAMPLING_INTERVAL_MSEC + 1,
+                            _ => 1,
+                        };
+                        let count = txsg
+                            .new_order
+                            .tx_cnt_histo
+                            .count_between(lower_tpm_bound, value);
+                        [value, count]
+                    })
+                    .collect();
+
+                let new_order_data = TxRtData {
                     tx_type: TransactionType::NewOrder,
                     tx_rt_p90: p90,
                     tx_rt_mean: txsg.new_order.fqd.mean() as u64,
@@ -304,8 +348,16 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                     tx_rt_series,
                 };
 
-                let mut reporting_data = ReportingData {
+                let new_order_throughput_data = ThroughputData {
+                    tx_type: TransactionType::NewOrder,
+                    steady_begin_time: *steady_begin_time_ms - *earliest_start_time_ms,
+                    steady_end_time: *steady_end_time_ms - *earliest_start_time_ms,
+                    tpm_series: tpm_series,
+                };
+
+                let reporting_data = ReportingData {
                     tx_rt_data_new_order: new_order_data,
+                    throughput_data_new_order: new_order_throughput_data,
                 };
 
                 let data_str = serde_json::to_string(&reporting_data)
