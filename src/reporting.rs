@@ -1,17 +1,14 @@
 use std::cmp::*;
-use std::collections::HashMap;
 use std::error::Error;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 use std::{fs, thread};
 
-use average::{concatenate, Estimate, Max, Mean, Quantile};
-use crossbeam_channel::{unbounded, Sender};
+use average::{Estimate, Max, Mean, Quantile};
+use crossbeam_channel::unbounded;
 use crossbeam_deque::{Steal, Worker};
 use hdrhistogram::Histogram;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::Serialize;
 
 use crate::cfg::TransactionType::*;
 use crate::cfg::*;
@@ -124,7 +121,7 @@ struct TxStatsGroup {
 pub fn analyze_term_group(
     paths: &Vec<String>,
     steady_begin_offset: Duration,
-    steady_end_offset: Duration,
+    steady_length: Duration,
 ) -> Result<TermGroupParams, Box<dyn Error>> {
     let w: Worker<String> = Worker::new_lifo();
     paths.iter().for_each(|f| w.push(f.clone()));
@@ -176,16 +173,12 @@ pub fn analyze_term_group(
         latest_start_time_ms: *lst,
         log_files_valid: lfv,
         steady_begin_time_ms: *lst + steady_begin_offset.as_millis() as u64,
-        steady_end_time_ms: *lst + steady_end_offset.as_millis() as u64,
+        steady_end_time_ms: *lst + steady_length.as_millis() as u64,
     })
 }
 
-pub fn build_reports(
-    paths: &Vec<String>,
-    steady_begin_offset: Duration,
-    steady_end_offset: Duration,
-) {
-    let group_params = analyze_term_group(paths, steady_begin_offset, steady_end_offset).unwrap();
+pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_length: Duration) {
+    let group_params = analyze_term_group(paths, steady_begin_offset, steady_length).unwrap();
 
     let w: Worker<String> = Worker::new_lifo();
     paths.iter().for_each(|f| w.push(f.clone()));
@@ -247,7 +240,7 @@ pub fn build_reports(
                 let record_time = record.time_started;
 
                 // Gathering metrics within steady interval
-                if (record_time >= *steady_begin_time_ms && record_time < *steady_end_time_ms) {
+                if record_time >= *steady_begin_time_ms && record_time < *steady_end_time_ms {
                     let tx_interval_value =
                         libm::ceil(record.tx_running_time as f64 / TX_SAMPLING_INTERVAL_MSEC_F)
                             as u64

@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::time::Duration;
 
 use humantime::parse_duration;
@@ -6,18 +5,22 @@ use structopt::StructOpt;
 
 use glob::glob;
 
+use self::util::parse_nums;
+
 mod cfg;
 mod generator;
 mod reporting;
 mod terminal;
+mod util;
 
 #[derive(StructOpt, Debug)]
 pub enum RunMode {
     /// Generate terminal configuration files
     Generate {
-        /// List of warehouse IDs
-        #[structopt(short = "w", long)]
-        warehouse_id_list: Vec<u32>,
+        /// List of warehouse IDs. Can be a single value, a comma separated list or a range (both ends are included)
+        /// Example: `-w 1..5` will generate configuration for five warehouses starting from 1
+        #[structopt(short = "w", long, parse(try_from_str = parse_nums))]
+        warehouse_id_list: Box<Vec<u32>>,
 
         /// Generate configuration for this many terminals
         #[structopt(short = "t", long)]
@@ -29,12 +32,17 @@ pub enum RunMode {
     },
     /// Build test reports
     TestReport {
+        /// Glob pattern for consuming log files with INTERNAL csv format
         #[structopt(short, long)]
         log_files_glob: String,
+        /// Begin of the measurement (steady) interval starting from the latest `time_started` value throughout the log files provided.
+        /// Accepts values in a human readable format, e.g. `1m` or `1h 15m`
         #[structopt(short = "b", long, parse(try_from_str = parse_duration))]
         steady_begin_offset: Duration,
+        /// Length of the measurement (steady) interval.
+        /// Accepts values in a human readable format, e.g. `1m` or `1h 15m`
         #[structopt(short = "e", long, parse(try_from_str = parse_duration))]
-        steady_end_offset: Duration,
+        steady_length: Duration,
     },
     /// Generate sample log files
     SampleLogFiles {
@@ -63,12 +71,12 @@ fn main() {
             terminal_count,
             transaction_count,
         } => {
-            generator::gen_cfg(warehouse_id_list, terminal_count, transaction_count);
+            generator::gen_cfg(*warehouse_id_list, terminal_count, transaction_count);
         }
         RunMode::TestReport {
             log_files_glob,
             steady_begin_offset,
-            steady_end_offset,
+            steady_length,
         } => {
             let mut log_files_paths: Vec<String> = Vec::new();
             for entry in glob(&log_files_glob).expect("Failed to read glob pattern") {
@@ -81,7 +89,7 @@ fn main() {
                     Err(e) => println!("{:?}", e),
                 }
             }
-            reporting::build_reports(&log_files_paths, steady_begin_offset, steady_end_offset);
+            reporting::build_reports(&log_files_paths, steady_begin_offset, steady_length);
         }
         RunMode::SampleLogFiles {
             terminal_count,

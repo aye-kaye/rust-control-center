@@ -32,6 +32,8 @@ pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_cou
     wh_id_set
         .iter()
         .cartesian_product(1..terminal_count + 1)
+        .collect::<Vec<(&u32, u32)>>()
+        .par_iter_mut()
         .for_each(|(w, t)| {
             let mut tx_vec: Vec<TransactionParams> = Vec::new();
             tx_breakdown(transaction_count)
@@ -107,7 +109,7 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
             let mut small_rng = SmallRng::from_entropy();
             let poi = Poisson::new(2.0).unwrap();
 
-            let mut term_running_time = Local::now().timestamp() as u64;
+            let mut term_running_time = Local::now().timestamp_millis() as u64;
 
             (0..iteration_count)
                 .collect::<Vec<u32>>()
@@ -123,9 +125,9 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
 
                             let keying_time = tx_def.keying_time_ms;
 
-                            let mut tx_rt_smpl_f: f64 = poi.sample(&mut rng);
+                            let mut tx_rt_smpl_f: f64 = poi.sample(&mut small_rng);
                             tx_rt_smpl_f += 1.;
-                            let rt_smpl_f: f64 = tx_rt_smpl_f * rng.gen_range(1.05, 1.15);
+                            let rt_smpl_f: f64 = tx_rt_smpl_f * small_rng.gen_range(1.05, 1.15);
                             let tx_rt_smpl = (tx_rt_smpl_f * 1000.) as u32;
                             let rt_smpl = (rt_smpl_f * 1000.) as u32;
 
