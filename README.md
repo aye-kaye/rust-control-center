@@ -15,10 +15,10 @@ Where
  
 ### Report mode
 
-`./cli_gen test-report -l *.log -b 0m -e 15m`
+`./cli_gen test-report -l "*.log" -b 0m -e 15m`
 
 Where
- - `-l, --log-files-glob *.log` glob pattern for consuming log files with INTERNAL csv format
+ - `-l, --log-files-glob "*.log"` glob pattern for consuming log files with INTERNAL csv format. The pattern needs to be double-quoted
  - `-b, --steady-begin-offset 0m` begin of the measurement (steady) interval defined as a time offset from the latest `time_started` value throughout the log files provided. Accepts values in a human readable format, e.g. `1m` or `1h 15m`
  - `-e, --steady-length 2h 15m` length of the measurement (steady) interval. Accepts values in a human readable format, e.g. `1m` or `1h 15m`
  

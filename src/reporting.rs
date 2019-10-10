@@ -174,8 +174,11 @@ pub fn analyze_term_group(
         .collect::<()>();
     barrier.wait();
     let lfv = log_files_valid.lock().unwrap().clone();
-    let est = earliest_start_time_ms.lock().unwrap();
+    let mut est = earliest_start_time_ms.lock().unwrap();
     let lst = latest_start_time_ms.lock().unwrap();
+    if let Ordering::Greater = est.cmp(&lst) {
+        *est = lst.clone();
+    }
     Ok(TermGroupParams {
         term_count: lfv.len() as u32,
         earliest_start_time_ms: *est,
