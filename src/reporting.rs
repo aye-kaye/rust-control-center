@@ -26,7 +26,7 @@ pub struct TermGroupParams {
 
 #[derive(Serialize, Debug)]
 pub struct ReportingData {
-    tx_rt_data_new_order: TxRtData,
+    tx_rt_data: Box<Vec<TxRtData>>,
     throughput_data_new_order: ThroughputData,
 }
 
@@ -37,7 +37,9 @@ pub struct TxRtData {
     tx_rt_mean: u64,
     tx_rt_max: u64,
     tx_rt_high: u64,
+    tx_rt_tx_count: u64,
     tx_rt_series: Vec<[u64; 2]>,
+    tpmc: u64,
 }
 
 #[derive(Serialize, Debug)]
@@ -238,6 +240,10 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
     let latest_start_time_ms: &u64 = &group_params.latest_start_time_ms;
     let steady_begin_time_ms: &u64 = &group_params.steady_begin_time_ms;
     let steady_end_time_ms: &u64 = &group_params.steady_end_time_ms;
+    let steady_legth_ms: u64 = match steady_begin_time_ms.cmp(steady_end_time_ms) {
+        Ordering::Greater => 0,
+        _ => *steady_end_time_ms - *steady_begin_time_ms,
+    };
 
     let mut txsg = TxStatsGroup {
         new_order: TxStatsNewOrderContainer::new(),
@@ -304,6 +310,7 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                 const TX_RT_INTERVAL_COUNT: u64 = 20;
 
                 //              New Order
+
                 let p90 = txsg.new_order.tx_rt_histo.value_at_percentile(90.);
                 let mut high = 0;
                 let tx_rt_4 = p90 * 4;
@@ -342,24 +349,67 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                     })
                     .collect();
 
+                let steady_begin_time = *steady_begin_time_ms - *earliest_start_time_ms;
+                let steady_end_time = *steady_end_time_ms - *earliest_start_time_ms;
+                let steady_count = txsg
+                    .new_order
+                    .tx_cnt_histo
+                    .count_between(steady_begin_time, steady_end_time);
+                let tpmc = match steady_legth_ms.cmp(&TPM_SAMPLING_INTERVAL_MSEC) {
+                    Ordering::Greater => {
+                        steady_count / (steady_legth_ms / TPM_SAMPLING_INTERVAL_MSEC)
+                    }
+                    _ => steady_count / TPM_SAMPLING_INTERVAL_SEC,
+                };
+
                 let new_order_data = TxRtData {
                     tx_type: TransactionType::NewOrder,
                     tx_rt_p90: p90,
                     tx_rt_mean: txsg.new_order.fqd.mean() as u64,
                     tx_rt_max: txsg.new_order.fqd.max() as u64,
                     tx_rt_high: high,
+                    tx_rt_tx_count: txsg.new_order.tx_rt_histo.len(),
                     tx_rt_series,
+                    tpmc,
                 };
 
                 let new_order_throughput_data = ThroughputData {
                     tx_type: TransactionType::NewOrder,
-                    steady_begin_time: *steady_begin_time_ms - *earliest_start_time_ms,
-                    steady_end_time: *steady_end_time_ms - *earliest_start_time_ms,
+                    steady_begin_time,
+                    steady_end_time,
                     tpm_series: tpm_series,
                 };
 
+                //              Payment
+
+                let p90_payment = txsg.payment.tx_rt_histo.value_at_percentile(90.);
+                let tx_rt_series_payment: Vec<[u64; 2]> = (1..TX_RT_INTERVAL_COUNT + 1)
+                    .map(|i| {
+                        let value = i * tx_rt_interval_size;
+                        let count = txsg
+                            .payment
+                            .tx_rt_histo
+                            .count_between((i - 1) * tx_rt_interval_size + 1, value);
+                        [value, count]
+                    })
+                    .collect();
+
+                //TODO функция
+                let payment_data = TxRtData {
+                    tx_type: TransactionType::Payment,
+                    tx_rt_p90: p90_payment,
+                    tx_rt_mean: txsg.payment.tx_rt_histo.mean() as u64,
+                    tx_rt_max: txsg.payment.tx_rt_histo.max() as u64,
+                    tx_rt_high: 0,
+                    tx_rt_tx_count: txsg.payment.tx_rt_histo.len(),
+                    tx_rt_series: tx_rt_series_payment,
+                    tpmc: 0,
+                };
+
+                let mut tx_rt_data = vec![new_order_data, payment_data];
+
                 let reporting_data = ReportingData {
-                    tx_rt_data_new_order: new_order_data,
+                    tx_rt_data: Box::new(tx_rt_data),
                     throughput_data_new_order: new_order_throughput_data,
                 };
 
@@ -368,13 +418,6 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                 let data_file_name = "data.json";
                 fs::write(&data_file_name, &data_str)
                     .expect(&format!("Error writing data file {}", &data_file_name));
-
-                println!(
-                    "New order tx frequency stats q90: {} mean: {} max: {}",
-                    txsg.new_order.fqd.quantile(),
-                    txsg.new_order.fqd.mean(),
-                    txsg.new_order.fqd.max()
-                );
 
                 return;
             }

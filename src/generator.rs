@@ -6,6 +6,7 @@ use std::fs;
 
 use chrono::{DateTime, Local};
 use itertools::Itertools;
+use rand::distributions::Standard;
 use rand::rngs::{SmallRng, StdRng};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, SeedableRng};
@@ -217,5 +218,6 @@ fn fraction_non_zero(base: f64, fraction: f64) -> u32 {
 }
 
 fn gen_think_time(mean_time_s: u32) -> u32 {
-    (-StdRng::from_entropy().gen::<f64>().ln() * (mean_time_s as f64) * 1000.0) as u32
+    let dstr: f64 = StdRng::from_entropy().sample(Standard);
+    (-dstr.ln() * (mean_time_s as f64) * 1000.0) as u32
 }

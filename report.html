@@ -1,32 +1,65 @@
 <head>
 
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300italic,700,700italic">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/5.0.0/normalize.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/milligram/1.3.0/milligram.min.css">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/handlebars.js/4.4.2/handlebars.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 
+<style>
+	body {
+		padding: 1em;
+	}
+</style>
+
 <script>
-	function loadChart() {
-		var data = {
-			"tx_rt_data_new_order" : {
-				"tx_rt_series" : []
-			}
+	var data = {
+			"tx_rt_data" : []
 		};
+	
+	function load() {
+		
+		loadChart(initHandlebars);
+	}
+	
+	function initHandlebars() {
+		Handlebars.registerHelper('ms_to_secs', function(ms) {
+			return (ms / 1000).toFixed(1);
+		});
+		
+		var source   = document.getElementById("tx_stats_template").innerHTML;
+		var template = Handlebars.compile(source);
+		var html 	 = template(data);		
+		document.getElementById("tx_stats").innerHTML = html;
+	}
+	
+	function loadChart(onLoadCallback) {
+		
 		var xhr = new XMLHttpRequest();		
 		xhr.open("GET", "data.json", true);
 		xhr.overrideMimeType("application/json");
 		xhr.onload = function() {
 			data = JSON.parse(xhr.responseText);
-			
-			var new_order = data.tx_rt_data_new_order;
+						
+			var new_order = data.tx_rt_data.find(function(element) { return element.tx_type === 'NewOrder'; });
+			var payment = data.tx_rt_data.find(function(element) { return element.tx_type === 'Payment'; });
 
 			var tx_rt_options = {
 			  chart: {
 				height: 380,
 				width: "100%"
 			  },
-			  colors: ['#2DA5F4'],
+			  colors: ['#2DA5F4', '#B5EAD7'],
 			  series: [
 				{
 				  name: "NewOrder",
 				  data: new_order.tx_rt_series,
+				  type: "line"
+				},
+				{
+				  name: "Payment",
+				  data: payment.tx_rt_series,
 				  type: "line"
 				}
 			  ],
@@ -72,11 +105,27 @@
 				},
 				offsetX: 0
 			  },
+			  legend: {
+			    itemMargin: {
+					horizontal: 10
+				},
+				onItemClick: {
+					toggleDataSeries: true
+				},
+			  },
 			  xaxis: {
+			    title: {
+					text: 'Transaction runtime, sec',
+				},
 				labels: {
 					formatter: function (val) {
 					  return (val / 1000).toFixed(1);
 					}
+				}
+			  },
+			  yaxis: {
+				title: {
+					text: 'Transaction count'
 				}
 			  }
 			};
@@ -134,10 +183,18 @@
 				}
 			  },
 			  xaxis: {
+				title: {
+					text: 'Elapsed Time, sec'
+				},
 				labels: {
 					formatter: function (val) {
 					  return (val / 1000).toFixed(0);
 					}
+				}
+			  },
+			  yaxis: {
+				title: {
+					text: 'tpmC'
 				}
 			  }
 			};
@@ -156,13 +213,45 @@
 			);
 
 			tpm_chart.render();
+			
+			onLoadCallback();
 		}
 		xhr.send();
 	}
 </script>
 </head>
-<body onload="loadChart();">
-  <div id="tx_rt_chart"></div>
-  <div style="padding: 20px" />
-  <div id="tpm_chart"></div>
+<body onload="load();">
+<div id="tx_stats"></div>
+
+<h3>Frequency distribution</h3>
+<div id="tx_rt_chart"></div>
+<div style="padding: 20px" >&nbsp;</div>
+<h3>Throughput</h3>
+<div id="tpm_chart"></div>
+
+<script id="tx_stats_template" type="text/x-handlebars-template">
+<h3>Transaction Runtime Statistics</h3>
+<p></p>
+<table>
+  <thead>
+	<tr>
+	  <th>Transaction Type</th>
+	  <th>90-th Percentile, sec</th>
+	  <th>Mean, sec</th>
+	  <th>Transaction count</th>
+	  <th>tpmC</th>
+	</tr>
+  </thead>
+  
+  <tbody>{{#each tx_rt_data}}  
+	<tr>
+	  <td>{{tx_type}}</td>
+	  <td>{{ms_to_secs tx_rt_p90}}</td>
+	  <td>{{ms_to_secs tx_rt_mean}}</td>
+	  <td>{{tx_rt_tx_count}}</td>
+	  <td>{{tpmc}}</td>
+	</tr>{{/each}}
+  </tbody>
+</table>
+</script>
 </body>
