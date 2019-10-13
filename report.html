@@ -11,6 +11,11 @@
 	body {
 		padding: 1em;
 	}
+	
+	table.quarter_table {
+		width: 25%;
+		min-width: 10em;
+	}
 </style>
 
 <script>
@@ -42,31 +47,43 @@
 		xhr.onload = function() {
 			data = JSON.parse(xhr.responseText);
 						
-			var new_order = data.tx_rt_data.find(function(element) { return element.tx_type === 'NewOrder'; });
-			var payment = data.tx_rt_data.find(function(element) { return element.tx_type === 'Payment'; });
+			var new_order = data.tx_data.find(function(element) { return element.tx_type === 'NewOrder'; });
+			var tx_rt_series_array = [];
+			data.tx_data.forEach(function(element) {
+				tx_rt_series_array.push({
+					name: element.tx_type,
+					data: element.tx_rt_data.tx_rt_series,
+					type: 'line'
+				});
+			}); 
+			
+			//find(function(element) { return element.tx_type === 'Payment'; });
 
 			var tx_rt_options = {
 			  chart: {
 				height: 380,
 				width: "100%"
 			  },
-			  colors: ['#2DA5F4', '#B5EAD7'],
+			  colors: ['#2DA5F4', '#B5EAD7', '#FFFFD8', '#FF9AA2', '#FFDAC1'],
+			  series: tx_rt_series_array,
+			  /*
 			  series: [
 				{
 				  name: "NewOrder",
-				  data: new_order.tx_rt_series,
+				  data: new_order.tx_rt_data.tx_rt_series,
 				  type: "line"
 				},
 				{
 				  name: "Payment",
-				  data: payment.tx_rt_series,
+				  data: payment.tx_rt_data.tx_rt_series,
 				  type: "line"
 				}
 			  ],
+			  */
 			  annotations: {
 				xaxis: [
 				  {
-					x: new_order.tx_rt_mean,
+					x: new_order.tx_rt_data.tx_rt_mean,
 					borderColor: "#2DA5F4",
 					label: {
 					  borderWidth: 0,
@@ -74,11 +91,11 @@
 						color: "#2DA5F4",
 						background: "rgba(255, 255, 255, 0.8)"
 					  },
-					  text: "Average = " + (new_order.tx_rt_mean / 1000).toFixed(1)
+					  text: "Average = " + (new_order.tx_rt_data.tx_rt_mean / 1000).toFixed(1)
 					}
 				  },
 				  {
-					x: new_order.tx_rt_p90,
+					x: new_order.tx_rt_data.tx_rt_p90,
 					borderColor: "#2DA5F4",					
 					label: {
 					  borderWidth: 0,
@@ -86,7 +103,7 @@
 						color: "#2DA5F4",
 						background: "rgba(255, 255, 255, 0.8)"
 					  },
-					  text: "90-th Percentile = " + (new_order.tx_rt_p90 / 1000).toFixed(1)
+					  text: "90-th Percentile = " + (new_order.tx_rt_data.tx_rt_p90 / 1000).toFixed(1)
 					}
 				  }
 				]
@@ -131,7 +148,7 @@
 			};
 			
 			
-			var tpm_new_order = data.throughput_data_new_order;
+			//var tpm_new_order = data.throughput_data_new_order;
 			var tpm_options = {
 			  chart: {
 				height: 380,
@@ -140,15 +157,21 @@
 			  colors: ['#2DA5F4'],
 			  series: [
 				{
-				  name: "NewOrder",
-				  data: tpm_new_order.tpm_series,
+				  name: "NewOrder tpmC",
+				  data: new_order.throughput_data.tpm_series,
 				  type: "line"
+				},
+				{
+				  name: "NewOrder count",
+				  data: new_order.throughput_data.tx_count_series,
+				  type: "bar"
 				}
+				
 			  ],
 			  annotations: {
 				xaxis: [
 				  {
-					x: tpm_new_order.steady_begin_time,
+					x: new_order.throughput_data.steady_begin_time,
 					borderColor: "#00E396",
 					label: {
 					  //borderColor: "#00E396",
@@ -157,11 +180,11 @@
 						color: "#00E396",
 						background: "rgba(255, 255, 255, 0.8)"
 					  },
-					  text: "Steady Started = " + (tpm_new_order.steady_begin_time / 1000).toFixed(0)
+					  text: "Steady Started = " + (new_order.throughput_data.steady_begin_time / 1000).toFixed(0)
 					}
 				  },
 				  {
-					x: tpm_new_order.steady_end_time,
+					x: new_order.throughput_data.steady_end_time,
 					borderColor: "#00E396",					
 					label: {
 					  //borderColor: "#00E396",
@@ -170,7 +193,7 @@
 						color: "#00E396",
 						background: "rgba(255, 255, 255, 0.8)"
 					  },
-					  text: "Steady Finished = " + (tpm_new_order.steady_end_time / 1000).toFixed(0)
+					  text: "Steady Finished = " + (new_order.throughput_data.steady_end_time / 1000).toFixed(0)
 					}
 				  }
 				]
@@ -243,15 +266,33 @@
 	</tr>
   </thead>
   
-  <tbody>{{#each tx_rt_data}}  
+  <tbody>{{#each tx_data}}  
 	<tr>
 	  <td>{{tx_type}}</td>
-	  <td>{{ms_to_secs tx_rt_p90}}</td>
-	  <td>{{ms_to_secs tx_rt_mean}}</td>
-	  <td>{{tx_rt_tx_count}}</td>
-	  <td>{{tpmc}}</td>
+	  <td>{{ms_to_secs tx_rt_data.tx_rt_p90}}</td>
+	  <td>{{ms_to_secs tx_rt_data.tx_rt_mean}}</td>
+	  <td>{{tx_rt_data.tx_rt_tx_count}}</td>
+	  <td>{{tx_rt_data.tpmc}}</td>
 	</tr>{{/each}}
   </tbody>
 </table>
+<h3>Total</h3>
+<table class="quarter_table">
+	<tbody>
+		<tr>
+			<td scope="row">tpmC</td>
+			<td>{{total_tpmc}}</td>
+		</tr>
+		<tr>
+			<td scope="row">Transaction count</td>
+			<td>{{total_tx_count}}</td>
+		</tr>
+		<tr>
+			<td scope="row">Terminal count</td>
+			<td>{{terminal_count}}</td>
+		</tr>
+	</tbody>
+</table>
+
 </script>
 </body>

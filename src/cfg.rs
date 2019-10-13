@@ -1,4 +1,6 @@
+use crate::cfg::TransactionType::*;
 use serde::{Deserialize, Serialize};
+use std::slice::Iter;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TermControlCfg {
@@ -23,4 +25,12 @@ pub enum TransactionType {
     OrderStatus,
     Delivery,
     StockLevel,
+}
+
+impl TransactionType {
+    pub fn iter() -> Iter<'static, TransactionType> {
+        static TRANSACTION_TYPES: [TransactionType; 5] =
+            [NewOrder, Payment, OrderStatus, Delivery, StockLevel];
+        TRANSACTION_TYPES.iter()
+    }
 }
