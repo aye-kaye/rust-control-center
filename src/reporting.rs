@@ -49,7 +49,9 @@ pub struct TxRtData {
     tx_rt_max: u64,
     tx_rt_high: u64,
     tx_rt_tx_count: u64,
+    tt_mean: u64,
     tx_rt_series: Vec<[u64; 2]>,
+    tt_series: Vec<[u64; 2]>,
     tpmc: u64,
 }
 
@@ -99,6 +101,7 @@ impl TxStatsNewOrderContainer {
 }
 
 pub const TX_RT_INTERVAL_COUNT: u64 = 20;
+pub const TT_INTERVAL_COUNT: u64 = 20;
 pub const PERCENTILE_90: f64 = 90.;
 
 pub fn analyze_term_group(
@@ -251,6 +254,13 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                             as u64
                             * TX_SAMPLING_INTERVAL_MSEC;
                     tx_stats_container.record_tx_rt(tx_interval_value);
+
+                    let tt_interval_value =
+                        libm::ceil(record.think_time_ms as f64 / TX_SAMPLING_INTERVAL_MSEC_F)
+                            as u64
+                            * TX_SAMPLING_INTERVAL_MSEC;
+                    tx_stats_container.record_tt(tt_interval_value);
+
                     tx_stats_container.record_steady();
                 }
 
@@ -283,6 +293,11 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                 let tx_rt_4x = tx_rt_1x * 4;
                 let tx_rt_interval_size = tx_rt_4x / TX_RT_INTERVAL_COUNT;
 
+                // and Think_Time graph scales
+                let tt_1x = txsg.get(&NewOrder).unwrap().borrow_mut().tt_histo.mean() as u64;
+                let tt_4x = tt_1x * 4;
+                let tt_interval_size = tt_4x / TT_INTERVAL_COUNT;
+
                 let mut tx_data: Vec<TransactionData> = Vec::new();
 
                 TransactionType::iter().for_each(|tx_type| {
@@ -300,6 +315,15 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                             let count =
                                 tx_rt_histo.count_between((i - 1) * tx_rt_interval_size + 1, value);
                             tx_rt_high = max(tx_rt_high, count);
+
+                            [value, count]
+                        })
+                        .collect();
+                    let tt_series: Vec<[u64; 2]> = (1..TT_INTERVAL_COUNT + 1)
+                        .map(|i| {
+                            let value = i * tt_interval_size;
+                            let count =
+                                tt_histo.count_between((i - 1) * tt_interval_size + 1, value);
 
                             [value, count]
                         })
@@ -336,7 +360,9 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                             tx_rt_max: tx_rt_histo.max() as u64,
                             tx_rt_high,
                             tx_rt_tx_count: steady_count,
+                            tt_mean: tt_histo.mean() as u64,
                             tx_rt_series,
+                            tt_series,
                             tpmc: tpmc as u64,
                         },
                         throughput_data: ThroughputData {
