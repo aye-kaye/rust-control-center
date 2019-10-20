@@ -12,10 +12,12 @@ use crossbeam_channel::unbounded;
 use crossbeam_deque::{Steal, Worker};
 use hdrhistogram::Histogram;
 use serde::Serialize;
+use structopt::StructOpt;
 
 use crate::cfg::TransactionType::*;
 use crate::cfg::*;
 use crate::terminal::*;
+use itertools::Itertools;
 
 #[derive(Debug)]
 pub struct TermGroupParams {
@@ -27,9 +29,19 @@ pub struct TermGroupParams {
     pub steady_end_time_ms: u64,
 }
 
+arg_enum! {
+    /// Report building mode. Either 'new' or 'add' modes are supported
+    #[derive(StructOpt, Debug)]
+    pub enum ReportMode {
+        New,
+        Add
+    }
+}
+
 #[derive(Serialize, Debug)]
 pub struct ReportingData {
     tx_data: Box<Vec<TransactionData>>,
+    total_tx_data: Box<ThroughputData>,
     total_tpmc: u64,
     total_tx_count: u64,
     terminal_count: usize,
@@ -61,6 +73,7 @@ pub struct ThroughputData {
     steady_end_time: u64,
     tpm_series: Vec<[u64; 2]>,
     tx_count_series: Vec<[u64; 2]>,
+    tx_rt_tpm_series: Vec<[u64; 2]>,
 }
 
 struct TxStatsNewOrderContainer {
@@ -165,7 +178,12 @@ pub fn analyze_term_group(
     })
 }
 
-pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_length: Duration) {
+pub fn build_reports(
+    paths: &Vec<String>,
+    steady_begin_offset: Duration,
+    steady_length: Duration,
+    report_mode: ReportMode,
+) {
     let group_params = analyze_term_group(paths, steady_begin_offset, steady_length).unwrap();
 
     let w: Worker<String> = Worker::new_lifo();
@@ -202,7 +220,7 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
     const TX_SAMPLING_INTERVAL_MSEC: u64 = TX_SAMPLING_INTERVAL_SEC * 100;
     const TX_SAMPLING_INTERVAL_MSEC_F: f64 = TX_SAMPLING_INTERVAL_MSEC as f64;
 
-    const TX_COUNT_SAMPLING_INTERVAL_SEC: u64 = 10;
+    const TX_COUNT_SAMPLING_INTERVAL_SEC: u64 = 30;
     const TX_COUNT_SAMPLING_INTERVAL_MSEC: u64 = TX_COUNT_SAMPLING_INTERVAL_SEC * 1000;
     const TX_COUNT_SAMPLING_INTERVAL_MSEC_F: f64 = TX_COUNT_SAMPLING_INTERVAL_MSEC as f64;
 
@@ -236,7 +254,7 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                 //TODO суммировать остальные части: keying_time + menu_time
                 let cycle_finish_time =
 //                    cycle_start_time + record.running_time as u64 + record.think_time_ms as u64;
-                        cycle_start_time + record.tx_running_time as u64 + record.think_time_ms as u64;
+                    cycle_start_time + record.tx_running_time as u64 + record.think_time_ms as u64;
                 let mut is_steady = false;
 
                 let mut tx_stats_container: RefMut<TxStatsNewOrderContainer> =
@@ -299,6 +317,8 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                 let tt_interval_size = tt_4x / TT_INTERVAL_COUNT;
 
                 let mut tx_data: Vec<TransactionData> = Vec::new();
+                let mut total_tpm_map: HashMap<u64, u64> = HashMap::new();
+                let mut total_tx_count_map: HashMap<u64, u64> = HashMap::new();
 
                 TransactionType::iter().for_each(|tx_type| {
                     let tx_cont_ref = txsg.get(tx_type).unwrap();
@@ -338,8 +358,14 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                                 _ => 1,
                             };
                             let count = tx_cnt_histo.count_between(lower_tpm_bound, value);
-                            tx_count_series.push([value, tx_cnt_histo.count_at(value)]);
+                            let count_at = tx_cnt_histo.count_at(value);
 
+                            let mut total_tpm_at = total_tpm_map.entry(value).or_insert(0);
+                            *total_tpm_at += count;
+                            let mut total_count_at = total_tx_count_map.entry(value).or_insert(0);
+                            *total_count_at += count_at;
+
+                            tx_count_series.push([value, count_at]);
                             [value, count]
                         })
                         .collect();
@@ -370,11 +396,28 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
                             steady_end_time,
                             tpm_series,
                             tx_count_series,
+                            tx_rt_tpm_series: vec![],
                         },
                     });
 
                     total_tx_count += steady_count;
                 });
+
+                let mut total_tx_data: ThroughputData = ThroughputData {
+                    steady_begin_time,
+                    steady_end_time,
+                    tpm_series: total_tpm_map
+                        .iter()
+                        .sorted_by_key(|e| e.0)
+                        .map(|(k, v)| [*k, *v])
+                        .collect::<Vec<[u64; 2]>>(),
+                    tx_count_series: total_tx_count_map
+                        .iter()
+                        .sorted_by_key(|e| e.0)
+                        .map(|(k, v)| [*k, *v])
+                        .collect::<Vec<[u64; 2]>>(),
+                    tx_rt_tpm_series: vec![],
+                };
 
                 total_tpmc = match steady_legth_ms.cmp(&TPM_SAMPLING_INTERVAL_MSEC) {
                     Ordering::Greater => {
@@ -386,6 +429,7 @@ pub fn build_reports(paths: &Vec<String>, steady_begin_offset: Duration, steady_
 
                 let reporting_data = ReportingData {
                     tx_data: Box::new(tx_data),
+                    total_tx_data: Box::new(total_tx_data),
                     total_tpmc,
                     total_tx_count,
                     terminal_count: group_params.log_files_valid.len(),

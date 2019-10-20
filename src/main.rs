@@ -6,12 +6,21 @@ use structopt::StructOpt;
 use glob::glob;
 
 use self::util::parse_nums;
+use std::error;
+use std::error::Error;
+use std::str::FromStr;
+use std::string::ParseError;
+
+#[macro_use]
+extern crate clap;
 
 mod cfg;
 mod generator;
 mod reporting;
 mod terminal;
 mod util;
+
+use self::reporting::ReportMode;
 
 #[derive(StructOpt, Debug)]
 pub enum RunMode {
@@ -33,7 +42,7 @@ pub enum RunMode {
     /// Build test reports
     TestReport {
         /// Glob pattern for consuming log files with INTERNAL csv format
-        #[structopt(short, long)]
+        #[structopt(short = "l", long)]
         log_files_glob: String,
         /// Begin of the measurement (steady) interval starting from the latest `time_started` value throughout the log files provided.
         /// Accepts values in a human readable format, e.g. `1m` or `1h 15m`
@@ -43,6 +52,9 @@ pub enum RunMode {
         /// Accepts values in a human readable format, e.g. `1m` or `1h 15m`
         #[structopt(short = "e", long, parse(try_from_str = parse_duration))]
         steady_length: Duration,
+        /// Report building mode
+        #[structopt(short = "m", long, default_value = "New")]
+        report_mode: ReportMode,
     },
     /// Generate sample log files
     SampleLogFiles {
@@ -77,6 +89,7 @@ fn main() {
             log_files_glob,
             steady_begin_offset,
             steady_length,
+            report_mode,
         } => {
             let mut log_files_paths: Vec<String> = Vec::new();
             for entry in glob(&log_files_glob).expect("Failed to read glob pattern") {
@@ -89,7 +102,12 @@ fn main() {
                     Err(e) => println!("{:?}", e),
                 }
             }
-            reporting::build_reports(&log_files_paths, steady_begin_offset, steady_length);
+            reporting::build_reports(
+                &log_files_paths,
+                steady_begin_offset,
+                steady_length,
+                report_mode,
+            );
         }
         RunMode::SampleLogFiles {
             terminal_count,

@@ -16,6 +16,14 @@
 		width: 25%;
 		min-width: 10em;
 	}
+	
+	.legend {
+      right: 0px; 
+	  position: absolute; 
+	  left: 0px; 
+	  top: auto; 
+	  bottom: 10px;
+    }
 </style>
 
 <script>
@@ -23,7 +31,13 @@
 			"tx_data" : []
 		};
 		
-	var graphColors = ['#2DA5F4', '#B5EAD7', '#FFFFD8', '#FF9AA2', '#FFDAC1'];
+	var tpmLegendNames = [];
+		
+	var graphColors = ['#2DA5F4', '#B5EAD7', '#FFFFD8', '#FF9AA2', '#FFDAC1', '#555555'];
+	
+	var tx_rt_chart;	
+	var tt_chart;
+	var tpm_chart;
 	
 	function load() {
 		
@@ -39,7 +53,39 @@
 		var template = Handlebars.compile(source);
 		var html 	 = template(data);		
 		document.getElementById("tx_stats").innerHTML = html;
+		
+		var tpmSource   = document.getElementById("tpm_legend_template").innerHTML;
+		var tpmTemplate = Handlebars.compile(tpmSource);
+		var tpmHtml  	= tpmTemplate(tpmLegendNames);		
+		document.getElementById("tpm_legend").innerHTML = tpmHtml;
 	}
+	
+	function initLegendsState() {
+        var allLegends = document.querySelectorAll(".legend .legend-series");
+		
+        for (var i = 0; i < allLegends.length; i++) {
+			if (allLegends[i].id !== 'NewOrder') {
+				toggleSeries(allLegends[i]);
+			}
+		}
+    }
+
+    // toggleSeries accepts a single argument which should match the series name you're trying to toggle
+    function toggleSeries(checkbox) {
+		var tpmSeriesNames = tpmLegendNames.find(function(element) { return element.id === checkbox.id; } );
+		if (tpmSeriesNames) {
+			tpmSeriesNames.series.forEach(function(series) {
+				tpm_chart.toggleSeries(series);
+			});
+			if (checkbox.checked === 'true') {
+				checkbox.checked = 'false';
+				checkbox.style.opacity = 1.0;
+			} else {
+				checkbox.checked = 'true';
+				checkbox.style.opacity = 0.5;
+			}			 
+		}
+    }
 	
 	function loadChart(onLoadCallback) {
 		
@@ -50,6 +96,7 @@
 			data = JSON.parse(xhr.responseText);
 						
 			var new_order = data.tx_data.find(function(element) { return element.tx_type === 'NewOrder'; });
+			var total_tx_data = data.total_tx_data;
 			
 			var tx_rt_series_array = [];
 			data.tx_data.forEach(function(element) {
@@ -69,6 +116,38 @@
 				});
 			});
 			
+			var tpm_series_array = [];
+			var colorPos = 0;
+			data.tx_data.forEach(function(element) {
+				var tpmSeriesName = element.tx_type;
+				tpm_series_array.push({
+					name: tpmSeriesName,
+					data: element.throughput_data.tpm_series,
+					type: 'line'
+				});
+				var tpmCountName = element.tx_type + ' Count';
+				tpm_series_array.push({
+					name: tpmCountName,
+					data: element.throughput_data.tx_count_series,
+					type: 'bar'
+				});
+				
+				tpmLegendNames.push( { 'id': tpmSeriesName, 'series': [tpmSeriesName, tpmCountName], 'color': graphColors[colorPos] } );
+				colorPos += 1;
+			});
+
+			
+			tpm_series_array.push({
+				name: 'Total',
+				data: total_tx_data.tpm_series,
+				type: 'line'
+			});
+			tpm_series_array.push({
+				name: 'Total Count',
+				data: total_tx_data.tx_count_series,
+				type: 'bar'
+			});
+			tpmLegendNames.push( { 'id': 'Total', 'series': ['Total', 'Total Count'], 'color': graphColors[colorPos] } );					
 
 			var tx_rt_options = {
 			  chart: {
@@ -112,13 +191,13 @@
 				  }
 				}
 			  },
-			  dataLabels: {
+			  /*dataLabels: {
 				enabled: true,
 				style: {
 					colors: ['#333']
 				},
 				offsetX: 0
-			  },
+			  },*/
 			  legend: {
 			    itemMargin: {
 					horizontal: 10
@@ -174,13 +253,13 @@
 				  }
 				}
 			  },
-			  dataLabels: {
+			  /*dataLabels: {
 				enabled: true,
 				style: {
 					colors: ['#333']
 				},
 				offsetX: 0
-			  },
+			  },*/
 			  legend: {
 			    itemMargin: {
 					horizontal: 10
@@ -206,26 +285,16 @@
 			  }
 			};
 			
+			var graphColorsDbl = [];
+			graphColors.forEach(function(c) { graphColorsDbl.push(c); graphColorsDbl.push(c); } );
 			
 			var tpm_options = {
 			  chart: {
 				height: 380,
 				width: "100%"
 			  },
-			  colors: ['#2DA5F4'],
-			  series: [
-				{
-				  name: "NewOrder tpmC",
-				  data: new_order.throughput_data.tpm_series,
-				  type: "line"
-				},
-				{
-				  name: "NewOrder count",
-				  data: new_order.throughput_data.tx_count_series,
-				  type: "bar"
-				}
-				
-			  ],
+			  colors: graphColorsDbl,
+			  series: tpm_series_array,
 			  annotations: {
 				xaxis: [
 				  {
@@ -277,34 +346,38 @@
 				title: {
 					text: 'tpmC'
 				}
+			  },
+			  legend: {
+				show: false
 			  }
 			};
 
 
-			var tx_rt_chart = new ApexCharts(
+			tx_rt_chart = new ApexCharts(
 				document.querySelector("#tx_rt_chart"),
 				tx_rt_options
 			);
 
 			tx_rt_chart.render();
 
-			var tt_chart = new ApexCharts(
+			tt_chart = new ApexCharts(
 				document.querySelector("#tt_chart"),
 				tt_options
 			);
 
 			tt_chart.render();
-
-			tt_options
-			
-			var tpm_chart = new ApexCharts(
+						
+			tpm_chart = new ApexCharts(
 				document.querySelector("#tpm_chart"),
 				tpm_options
 			);
 
-			tpm_chart.render();
-			
-			onLoadCallback();
+			tpm_chart
+				.render()
+				.then(function(value) {
+					onLoadCallback();
+					initLegendsState();
+				});			
 		}
 		xhr.send();
 	}
@@ -321,6 +394,7 @@
 <div style="padding: 20px" >&nbsp;</div>
 <h3>Throughput</h3>
 <div id="tpm_chart"></div>
+<div id="tpm_legend"></div>
 
 <script id="tx_stats_template" type="text/x-handlebars-template">
 <h3>Transaction Runtime Statistics</h3>
@@ -364,5 +438,15 @@
 	</tbody>
 </table>
 
+</script>
+<script id="tpm_legend_template" type="text/x-handlebars-template">
+<div class="legend apexcharts-legend center position-bottom">
+{{#each this}}  
+  <div id="{{id}}" class="apexcharts-legend-series legend-series" style="margin-right: 10px;" checked="true" onclick="toggleSeries(this)">
+	  <span class="apexcharts-legend-marker" style="background: {{color}} none repeat scroll 0% 0%; color: rgb(45, 165, 244); height: 12px; width: 12px; left: 0px; top: 0px; border-width: 0px; border-color: rgb(255, 255, 255); border-radius: 12px;" rel="1"></span>
+	  <span class="apexcharts-legend-text" style="color: rgb(55, 61, 63); font-size: 12px; font-family: Helvetica, Arial, sans-serif;" rel="1" i="0" >{{id}}</span>
+  </div>
+{{/each}}
+</div>
 </script>
 </body>
