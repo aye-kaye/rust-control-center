@@ -55,6 +55,9 @@ pub enum RunMode {
         /// Report building mode
         #[structopt(short = "m", long, default_value = "New")]
         report_mode: ReportMode,
+        /// Report path
+        #[structopt(short = "r", long, required_if("report-mode", "Append"))]
+        report_path: Option<String>,
     },
     /// Generate sample log files
     SampleLogFiles {
@@ -90,6 +93,7 @@ fn main() {
             steady_begin_offset,
             steady_length,
             report_mode,
+            report_path,
         } => {
             let mut log_files_paths: Vec<String> = Vec::new();
             for entry in glob(&log_files_glob).expect("Failed to read glob pattern") {
@@ -107,6 +111,7 @@ fn main() {
                 steady_begin_offset,
                 steady_length,
                 report_mode,
+                report_path,
             );
         }
         RunMode::SampleLogFiles {

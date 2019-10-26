@@ -1,23 +1,30 @@
+use std::{fs, io, thread};
 use std::cell::{RefCell, RefMut};
 use std::cmp::*;
 use std::collections::HashMap;
 use std::error::Error;
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io::{Read, Seek, Write};
 use std::iter::Enumerate;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
-use std::{fs, thread};
 
 use average::{Estimate, Max, Mean, Quantile};
+use chrono::{DateTime, Local};
 use crossbeam_channel::unbounded;
 use crossbeam_deque::{Steal, Worker};
 use hdrhistogram::Histogram;
-use serde::Serialize;
+use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 
-use crate::cfg::TransactionType::*;
+use glob::glob;
+
 use crate::cfg::*;
+use crate::cfg::TransactionType::*;
 use crate::terminal::*;
-use itertools::Itertools;
 
 #[derive(Debug)]
 pub struct TermGroupParams {
@@ -30,31 +37,32 @@ pub struct TermGroupParams {
 }
 
 arg_enum! {
-    /// Report building mode. Either 'new' or 'add' modes are supported
+    /// Report building mode. Either 'New' or 'Append' modes are supported
     #[derive(StructOpt, Debug)]
     pub enum ReportMode {
         New,
-        Add
+        Append
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ReportingData {
     tx_data: Box<Vec<TransactionData>>,
     total_tx_data: Box<ThroughputData>,
+    tx_rt_tpm_series: Vec<[u64; 2]>,
     total_tpmc: u64,
     total_tx_count: u64,
     terminal_count: usize,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct TransactionData {
     tx_type: TransactionType,
     tx_rt_data: TxRtData,
     throughput_data: ThroughputData,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct TxRtData {
     tx_rt_p90: u64,
     tx_rt_mean: u64,
@@ -67,13 +75,12 @@ pub struct TxRtData {
     tpmc: u64,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ThroughputData {
     steady_begin_time: u64,
     steady_end_time: u64,
     tpm_series: Vec<[u64; 2]>,
     tx_count_series: Vec<[u64; 2]>,
-    tx_rt_tpm_series: Vec<[u64; 2]>,
 }
 
 struct TxStatsNewOrderContainer {
@@ -116,6 +123,20 @@ impl TxStatsNewOrderContainer {
 pub const TX_RT_INTERVAL_COUNT: u64 = 20;
 pub const TT_INTERVAL_COUNT: u64 = 20;
 pub const PERCENTILE_90: f64 = 90.;
+pub const DATA_VAR_PREFIX: &str = "var data=";
+pub const DATA_FILE_NAME: &str = "data.js";
+pub const REPORT_FILE_NAME: &str = "report.html";
+
+const TX_SAMPLING_INTERVAL_SEC: u64 = 1;
+const TX_SAMPLING_INTERVAL_MSEC: u64 = TX_SAMPLING_INTERVAL_SEC * 100;
+const TX_SAMPLING_INTERVAL_MSEC_F: f64 = TX_SAMPLING_INTERVAL_MSEC as f64;
+
+const TX_COUNT_SAMPLING_INTERVAL_SEC: u64 = 30;
+const TX_COUNT_SAMPLING_INTERVAL_MSEC: u64 = TX_COUNT_SAMPLING_INTERVAL_SEC * 1000;
+const TX_COUNT_SAMPLING_INTERVAL_MSEC_F: f64 = TX_COUNT_SAMPLING_INTERVAL_MSEC as f64;
+
+const TPM_SAMPLING_INTERVAL_SEC: u64 = 60;
+const TPM_SAMPLING_INTERVAL_MSEC: u64 = TPM_SAMPLING_INTERVAL_SEC * 1000;
 
 pub fn analyze_term_group(
     paths: &Vec<String>,
@@ -160,7 +181,7 @@ pub fn analyze_term_group(
                 b.wait();
             });
         })
-        .collect::<()>();
+        .for_each(drop);
     barrier.wait();
     let lfv = log_files_valid.lock().unwrap().clone();
     let mut est = earliest_start_time_ms.lock().unwrap();
@@ -183,7 +204,31 @@ pub fn build_reports(
     steady_begin_offset: Duration,
     steady_length: Duration,
     report_mode: ReportMode,
+    report_path: Option<String>,
 ) {
+    if let ReportMode::Append = report_mode {
+        if report_path.is_none() {
+            panic!("report-mode 'Append' requires non-empty path")
+        } else if ![&report_path.clone().unwrap(), DATA_FILE_NAME]
+            .iter()
+            .collect::<PathBuf>()
+            .exists()
+        {
+            panic!("Report path or data file (data.js) does not exist")
+        }
+    }
+
+    let now: DateTime<Local> = Local::now();
+    let start_ts = now.format("%Y%m%d_%H%M%S");
+
+    let final_report_path = report_path.clone().unwrap_or(String::from(
+        ["test-reports", &format!("{}", &start_ts)]
+            .iter()
+            .collect::<PathBuf>()
+            .to_str()
+            .unwrap(),
+    ));
+
     let group_params = analyze_term_group(paths, steady_begin_offset, steady_length).unwrap();
 
     let w: Worker<String> = Worker::new_lifo();
@@ -209,23 +254,12 @@ pub fn build_reports(
                 b.wait();
             });
         })
-        .collect::<()>();
+        .for_each(drop);
 
     thread::spawn(move || {
         barrier.clone().wait();
         drop(sender);
     });
-
-    const TX_SAMPLING_INTERVAL_SEC: u64 = 1;
-    const TX_SAMPLING_INTERVAL_MSEC: u64 = TX_SAMPLING_INTERVAL_SEC * 100;
-    const TX_SAMPLING_INTERVAL_MSEC_F: f64 = TX_SAMPLING_INTERVAL_MSEC as f64;
-
-    const TX_COUNT_SAMPLING_INTERVAL_SEC: u64 = 30;
-    const TX_COUNT_SAMPLING_INTERVAL_MSEC: u64 = TX_COUNT_SAMPLING_INTERVAL_SEC * 1000;
-    const TX_COUNT_SAMPLING_INTERVAL_MSEC_F: f64 = TX_COUNT_SAMPLING_INTERVAL_MSEC as f64;
-
-    const TPM_SAMPLING_INTERVAL_SEC: u64 = 60;
-    const TPM_SAMPLING_INTERVAL_MSEC: u64 = TPM_SAMPLING_INTERVAL_SEC * 1000;
 
     let earliest_start_time_ms: &u64 = &group_params.earliest_start_time_ms;
     let latest_start_time_ms: &u64 = &group_params.latest_start_time_ms;
@@ -316,6 +350,69 @@ pub fn build_reports(
                 let tt_4x = tt_1x * 4;
                 let tt_interval_size = tt_4x / TT_INTERVAL_COUNT;
 
+                // and Throughput variables
+                let mut tx_rt_tpm_series: Vec<[u64; 2]> = Vec::new();
+                let mut curr_tpmc: u64 = 0;
+                {
+                    let curr_tx_cont_ref = txsg.get(&TransactionType::NewOrder).unwrap();
+                    let curr_tx_cont = curr_tx_cont_ref.borrow_mut();
+                    let curr_steady_count = curr_tx_cont.steady_count.clone();
+                    curr_tpmc = calculate_tpmc(&steady_legth_ms, &curr_steady_count);
+                }
+
+                if let ReportMode::Append = report_mode {
+                    let prev_reporting_data_path: PathBuf =
+                        [&report_path.clone().unwrap(), DATA_FILE_NAME]
+                            .iter()
+                            .collect();
+                    let mut prev_data_file =
+                        File::open(&prev_reporting_data_path).expect(&format!(
+                            "Error opening previous report data file {:?}",
+                            prev_reporting_data_path
+                        ));
+                    let mut prev_reporting_data_full = String::new();
+                    prev_data_file
+                        .read_to_string(&mut prev_reporting_data_full)
+                        .expect(&format!(
+                            "Error reading previous report data file {:?}",
+                            prev_reporting_data_path
+                        ));
+                    let prev_reporting_data_str =
+                        &prev_reporting_data_full[DATA_VAR_PREFIX.len()..];
+                    let prev_reporting_data: ReportingData =
+                        serde_json::from_str(prev_reporting_data_str).unwrap();
+
+                    let prev_tx_rt_tpm_series = &prev_reporting_data.tx_rt_tpm_series;
+                    // Скопировать старые значения
+                    prev_tx_rt_tpm_series
+                        .iter()
+                        .for_each(|pair| tx_rt_tpm_series.push([pair[0].clone(), pair[1].clone()]));
+
+                    let prev_max = prev_tx_rt_tpm_series
+                        .iter()
+                        .find(|pair| pair[0] > curr_tpmc as u64);
+                    // Старый файл уже содержит значение больше текущего tpmC, надо просто дописать в него текущее tpmC
+                    if let Some(pair) = prev_max {
+                        println!("Appending a new tpmC reading");
+                        tx_rt_tpm_series.push([curr_tpmc, tx_rt_1x]);
+
+                        let new_reporting_data = ReportingData {
+                            tx_data: prev_reporting_data.tx_data,
+                            total_tx_data: prev_reporting_data.total_tx_data,
+                            tx_rt_tpm_series,
+                            total_tpmc: prev_reporting_data.total_tpmc,
+                            total_tx_count: prev_reporting_data.total_tx_count,
+                            terminal_count: prev_reporting_data.terminal_count,
+                        };
+                        write_report_file(&final_report_path, &new_reporting_data);
+                        return;
+                    } else {
+                        println!("Rebuilding a report respecting the previous tpmC readings");
+                    }
+                }
+
+                tx_rt_tpm_series.push([curr_tpmc, tx_rt_1x]);
+
                 let mut tx_data: Vec<TransactionData> = Vec::new();
                 let mut total_tpm_map: HashMap<u64, u64> = HashMap::new();
                 let mut total_tx_count_map: HashMap<u64, u64> = HashMap::new();
@@ -362,7 +459,7 @@ pub fn build_reports(
 
                             let mut total_tpm_at = total_tpm_map.entry(value).or_insert(0);
                             *total_tpm_at += count;
-                            let mut total_count_at = total_tx_count_map.entry(value).or_insert(0);
+                            let total_count_at = total_tx_count_map.entry(value).or_insert(0);
                             *total_count_at += count_at;
 
                             tx_count_series.push([value, count_at]);
@@ -370,13 +467,7 @@ pub fn build_reports(
                         })
                         .collect();
 
-                    let tpmc = match steady_legth_ms.cmp(&TPM_SAMPLING_INTERVAL_MSEC) {
-                        Ordering::Greater => {
-                            steady_count as f64
-                                / (steady_legth_ms as f64 / TPM_SAMPLING_INTERVAL_MSEC as f64)
-                        }
-                        _ => steady_count as f64 / TPM_SAMPLING_INTERVAL_SEC as f64,
-                    };
+                    let tpmc = calculate_tpmc(&steady_legth_ms, &steady_count);
 
                     tx_data.push(TransactionData {
                         tx_type: tx_type.clone(),
@@ -396,12 +487,11 @@ pub fn build_reports(
                             steady_end_time,
                             tpm_series,
                             tx_count_series,
-                            tx_rt_tpm_series: vec![],
                         },
                     });
 
                     total_tx_count += steady_count;
-                });
+                }); // End of TransactionType loop
 
                 let mut total_tx_data: ThroughputData = ThroughputData {
                     steady_begin_time,
@@ -416,7 +506,6 @@ pub fn build_reports(
                         .sorted_by_key(|e| e.0)
                         .map(|(k, v)| [*k, *v])
                         .collect::<Vec<[u64; 2]>>(),
-                    tx_rt_tpm_series: vec![],
                 };
 
                 total_tpmc = match steady_legth_ms.cmp(&TPM_SAMPLING_INTERVAL_MSEC) {
@@ -430,16 +519,14 @@ pub fn build_reports(
                 let reporting_data = ReportingData {
                     tx_data: Box::new(tx_data),
                     total_tx_data: Box::new(total_tx_data),
+                    tx_rt_tpm_series,
                     total_tpmc,
                     total_tx_count,
                     terminal_count: group_params.log_files_valid.len(),
                 };
 
-                let data_str = serde_json::to_string(&reporting_data)
-                    .expect("Unsupported reporting data format");
-                let data_file_name = "data.json";
-                fs::write(&data_file_name, &data_str)
-                    .expect(&format!("Error writing data file {}", &data_file_name));
+                write_report_file(&final_report_path, &reporting_data);
+                copy_assets(&final_report_path);
 
                 println!(
                     "Total running time {}",
@@ -449,5 +536,72 @@ pub fn build_reports(
                 return;
             }
         }
+    }
+
+    fn calculate_tpmc(steady_length_ms: &u64, tx_count: &u64) -> u64 {
+        return match steady_length_ms.cmp(&TPM_SAMPLING_INTERVAL_MSEC) {
+            Ordering::Greater => {
+                *tx_count as f64 / (*steady_length_ms as f64 / TPM_SAMPLING_INTERVAL_MSEC as f64)
+            }
+            _ => *tx_count as f64 / TPM_SAMPLING_INTERVAL_SEC as f64,
+        } as u64;
+    }
+
+    fn write_report_file(report_path: &str, reporting_data: &ReportingData) {
+        fs::create_dir_all(&report_path).expect(&format!(
+            "Error creating test report directory {:?}",
+            &report_path
+        ));
+        let data_str =
+            serde_json::to_string(&reporting_data).expect("Unsupported reporting data format");
+        let data_file_path = [&report_path, DATA_FILE_NAME].iter().collect::<PathBuf>();
+        let mut data_file = File::create(&data_file_path)
+            .expect(&format!("Error creating data file {:?}", &data_file_path));
+        let data_file_err_msg = format!("Error writing data file {:?}", &data_file_path);
+        data_file
+            .write(DATA_VAR_PREFIX.as_bytes())
+            .expect(&data_file_err_msg);
+        data_file
+            .write(data_str.as_bytes())
+            .expect(&data_file_err_msg);
+    }
+
+    fn copy_assets(report_path: &str) {
+        fs::create_dir_all(&report_path).expect(&format!(
+            "Error creating test report directory {:?}",
+            &report_path
+        ));
+        let copy_err_msg = "Error copying an asset file";
+        ["css", "js"].iter().for_each(|dir| {
+            let dir_path = ["assets", *dir, "*.*"].iter().collect::<PathBuf>();
+            let mut dir_target_path = [report_path, *dir].iter().collect::<PathBuf>();
+            fs::create_dir_all(&dir_target_path).expect(&format!(
+                "Error creating asset directory {:?}",
+                &dir_target_path
+            ));
+            for entry in glob(dir_path.to_str().unwrap())
+                .unwrap()
+                .filter_map(Result::ok)
+            {
+                let file_name: &OsStr = entry.file_name().unwrap();
+                dir_target_path.push(file_name);
+                fs::copy(entry.to_str().unwrap(), dir_target_path.to_str().unwrap())
+                    .expect(copy_err_msg);
+                dir_target_path.pop();
+            }
+        });
+        fs::copy(
+            ["assets", "html", REPORT_FILE_NAME]
+                .iter()
+                .collect::<PathBuf>()
+                .to_str()
+                .unwrap(),
+            [report_path, REPORT_FILE_NAME]
+                .iter()
+                .collect::<PathBuf>()
+                .to_str()
+                .unwrap(),
+        )
+        .expect(copy_err_msg);
     }
 }
