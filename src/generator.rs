@@ -6,14 +6,16 @@ use std::fs;
 
 use chrono::{DateTime, Local};
 use itertools::Itertools;
+use rand::distributions::Standard;
 use rand::rngs::{SmallRng, StdRng};
+use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, SeedableRng};
+use rand_distr::{Distribution, Poisson};
 use rayon::prelude::*;
 
 use crate::cfg::*;
 use crate::terminal::*;
-use rand::seq::SliceRandom;
-use rand_distr::{Distribution, Poisson};
+use std::path::PathBuf;
 
 pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_count: u32) -> () {
     if warehouse_id_list.len() == 0 {
@@ -32,6 +34,8 @@ pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_cou
     wh_id_set
         .iter()
         .cartesian_product(1..terminal_count + 1)
+        .collect::<Vec<(&u32, u32)>>()
+        .par_iter_mut()
         .for_each(|(w, t)| {
             let mut tx_vec: Vec<TransactionParams> = Vec::new();
             tx_breakdown(transaction_count)
@@ -61,7 +65,15 @@ pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_cou
             };
             let str = serde_yaml::to_string(&cfgz).expect("Unsupported configuration format");
             let cfg_file_name = format!("{}_W{}_T{}.cfg", &ts, w, t);
-            fs::write(&cfg_file_name, &str)
+            let cfg_file_dir: PathBuf = ["term-config", &format!("{}", &ts)].iter().collect();
+            let cfg_file_path: PathBuf = [cfg_file_dir.to_str().unwrap(), &cfg_file_name]
+                .iter()
+                .collect();
+            fs::create_dir_all(&cfg_file_dir).expect(&format!(
+                "Error creating terminal configuration directory {:?}",
+                &cfg_file_dir
+            ));
+            fs::write(&cfg_file_path, &str)
                 .expect(&format!("Error writing cfg file {}", &cfg_file_name));
         });
 }
@@ -85,7 +97,17 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
         .par_iter_mut()
         .for_each(|t| {
             let log_file_name = format!("{}_T{}.csv", start_ts, t);
-            let mut wtr = csv::Writer::from_path(&log_file_name).unwrap();
+
+            let log_file_dir: PathBuf = ["sample-logs", &format!("{}", &start_ts)].iter().collect();
+            let log_file_path: PathBuf = [log_file_dir.to_str().unwrap(), &log_file_name]
+                .iter()
+                .collect();
+            fs::create_dir_all(&log_file_dir).expect(&format!(
+                "Error creating sample logs directory {:?}",
+                &log_file_dir
+            ));
+
+            let mut wtr = csv::Writer::from_path(&log_file_path).unwrap();
 
             let tx_bkdwn = tx_breakdown(TRANSACTION_COUNT);
 
@@ -107,7 +129,7 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
             let mut small_rng = SmallRng::from_entropy();
             let poi = Poisson::new(2.0).unwrap();
 
-            let mut term_running_time = Local::now().timestamp() as u64;
+            let mut term_running_time = Local::now().timestamp_millis() as u64;
 
             (0..iteration_count)
                 .collect::<Vec<u32>>()
@@ -123,9 +145,9 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
 
                             let keying_time = tx_def.keying_time_ms;
 
-                            let mut tx_rt_smpl_f: f64 = poi.sample(&mut rng);
+                            let mut tx_rt_smpl_f: f64 = poi.sample(&mut small_rng);
                             tx_rt_smpl_f += 1.;
-                            let rt_smpl_f: f64 = tx_rt_smpl_f * rng.gen_range(1.05, 1.15);
+                            let rt_smpl_f: f64 = tx_rt_smpl_f * small_rng.gen_range(1.05, 1.15);
                             let tx_rt_smpl = (tx_rt_smpl_f * 1000.) as u32;
                             let rt_smpl = (rt_smpl_f * 1000.) as u32;
 
@@ -215,5 +237,6 @@ fn fraction_non_zero(base: f64, fraction: f64) -> u32 {
 }
 
 fn gen_think_time(mean_time_s: u32) -> u32 {
-    (-StdRng::from_entropy().gen::<f64>().ln() * (mean_time_s as f64) * 1000.0) as u32
+    let dstr: f64 = StdRng::from_entropy().sample(Standard);
+    (-dstr.ln() * (mean_time_s as f64) * 1000.0) as u32
 }
