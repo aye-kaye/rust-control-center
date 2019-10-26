@@ -15,6 +15,7 @@ use rayon::prelude::*;
 
 use crate::cfg::*;
 use crate::terminal::*;
+use std::path::PathBuf;
 
 pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_count: u32) -> () {
     if warehouse_id_list.len() == 0 {
@@ -64,7 +65,15 @@ pub fn gen_cfg(warehouse_id_list: Vec<u32>, terminal_count: u32, transaction_cou
             };
             let str = serde_yaml::to_string(&cfgz).expect("Unsupported configuration format");
             let cfg_file_name = format!("{}_W{}_T{}.cfg", &ts, w, t);
-            fs::write(&cfg_file_name, &str)
+            let cfg_file_dir: PathBuf = ["term-config", &format!("{}", &ts)].iter().collect();
+            let cfg_file_path: PathBuf = [cfg_file_dir.to_str().unwrap(), &cfg_file_name]
+                .iter()
+                .collect();
+            fs::create_dir_all(&cfg_file_dir).expect(&format!(
+                "Error creating terminal configuration directory {:?}",
+                &cfg_file_dir
+            ));
+            fs::write(&cfg_file_path, &str)
                 .expect(&format!("Error writing cfg file {}", &cfg_file_name));
         });
 }
@@ -88,7 +97,17 @@ pub fn gen_sample_data(terminal_count: u32, iteration_count: u32) -> () {
         .par_iter_mut()
         .for_each(|t| {
             let log_file_name = format!("{}_T{}.csv", start_ts, t);
-            let mut wtr = csv::Writer::from_path(&log_file_name).unwrap();
+
+            let log_file_dir: PathBuf = ["sample-logs", &format!("{}", &start_ts)].iter().collect();
+            let log_file_path: PathBuf = [log_file_dir.to_str().unwrap(), &log_file_name]
+                .iter()
+                .collect();
+            fs::create_dir_all(&log_file_dir).expect(&format!(
+                "Error creating sample logs directory {:?}",
+                &log_file_dir
+            ));
+
+            let mut wtr = csv::Writer::from_path(&log_file_path).unwrap();
 
             let tx_bkdwn = tx_breakdown(TRANSACTION_COUNT);
 
