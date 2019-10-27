@@ -34,6 +34,7 @@
 	
 	var tx_rt_chart;	
 	var tt_chart;
+	var tx_rt_tpm_chart;
 	var tpm_chart;
 	
 	function load() {
@@ -106,6 +107,21 @@
 				});
 			});
 			
+			var tx_rt_tpm_series_array = [{
+				name: 'NewOrder',
+				data: data.tx_rt_tpm_series.sort(function(pairA, pairB) {
+					return pairA[0] - pairB[0];
+				}),
+				type: 'line'
+			}];
+			var tx_rt_tpm_max = 0;
+			data.tx_rt_tpm_series.forEach(function(pair) {
+				if (pair[0] && pair[0] > tx_rt_tpm_max) {
+					tx_rt_tpm_max = pair[0];
+				}
+			});
+			tx_rt_tpm_max = tx_rt_tpm_max === 0 ? Number.MAX_SAFE_INTEGER : tx_rt_tpm_max;
+			
 			var tpm_series_array = [];
 			var colorPos = 0;
 			data.tx_data.forEach(function(element) {
@@ -137,7 +153,7 @@
 				data: total_tx_data.tx_count_series,
 				type: 'bar'
 			});
-			tpmLegendNames.push( { 'id': 'Total', 'series': ['Total', 'Total Count'], 'color': graphColors[colorPos] } );					
+			tpmLegendNames.push( { 'id': 'Total', 'series': ['Total', 'Total Count'], 'color': graphColors[colorPos] } );
 
 			var tx_rt_options = {
 			  chart: {
@@ -181,13 +197,6 @@
 				  }
 				}
 			  },
-			  /*dataLabels: {
-				enabled: true,
-				style: {
-					colors: ['#333']
-				},
-				offsetX: 0
-			  },*/
 			  legend: {
 			    itemMargin: {
 					horizontal: 10
@@ -209,6 +218,68 @@
 			  yaxis: {
 				title: {
 					text: 'Transaction count'
+				}
+			  }
+			};
+			
+			var tx_rt_tpm_options = {
+			  chart: {
+				height: 380,
+				width: "100%"
+			  },
+			  colors: graphColors,
+			  series: tx_rt_tpm_series_array,
+			  annotations: {
+				yaxis: [
+				  {
+					y: 5000,
+					borderColor: "#2DA5F4",
+					label: {
+					  borderWidth: 0,
+					  style: {
+						color: "#2DA5F4",
+						background: "rgba(255, 255, 255, 0.8)"
+					  },
+					  text: "90-th Percentile 5 Sec"
+					}
+				  }
+				]
+			  },
+			  tooltip: {
+				y: {
+				  formatter: function(val) {
+					return (val / 1000).toFixed(1);
+				  }
+				}
+			  },			  
+			  legend: {
+				showForSingleSeries: true,
+			    itemMargin: {
+					horizontal: 10
+				},
+				onItemClick: {
+					toggleDataSeries: true
+				}
+			  },
+			  xaxis: {
+			    title: {
+					text: 'tpmC',
+				},
+				labels: {
+					formatter: function (val) {
+					  return ((val * 100.0) / tx_rt_tpm_max ).toFixed(0) + ' %';
+					}
+				}
+			  },
+			  yaxis: {
+				min: 0,
+				title: {
+					text: '90-th Percentile Response Time, sec'
+				},
+				labels: {
+					formatter: function (val) {
+					  return (val / 1000).toFixed(1);
+					}
 				}
 			  }
 			};
@@ -243,13 +314,6 @@
 				  }
 				}
 			  },
-			  /*dataLabels: {
-				enabled: true,
-				style: {
-					colors: ['#333']
-				},
-				offsetX: 0
-			  },*/
 			  legend: {
 			    itemMargin: {
 					horizontal: 10
@@ -291,7 +355,6 @@
 					x: new_order.throughput_data.steady_begin_time,
 					borderColor: "#00E396",
 					label: {
-					  //borderColor: "#00E396",
 					  borderWidth: 0,
 					  style: {
 						color: "#00E396",
@@ -304,7 +367,6 @@
 					x: new_order.throughput_data.steady_end_time,
 					borderColor: "#00E396",					
 					label: {
-					  //borderColor: "#00E396",
 					  borderWidth: 0,
 					  style: {
 						color: "#00E396",
@@ -333,6 +395,7 @@
 				}
 			  },
 			  yaxis: {
+				min: 0,
 				title: {
 					text: 'tpmC'
 				}
@@ -350,6 +413,13 @@
 
 			tx_rt_chart.render();
 
+			tx_rt_tpm_chart = new ApexCharts(
+				document.querySelector("#tx_rt_tpm_chart"),
+				tx_rt_tpm_options
+			);
+
+			tx_rt_tpm_chart.render();
+			
 			tt_chart = new ApexCharts(
 				document.querySelector("#tt_chart"),
 				tt_options
@@ -376,6 +446,9 @@
 
 <h3>Transaction Response Time Frequency Distribution</h3>
 <div id="tx_rt_chart"></div>
+<div style="padding: 20px" >&nbsp;</div>
+<h3>Response Times vs Throughput</h3>
+<div id="tx_rt_tpm_chart"></div>
 <div style="padding: 20px" >&nbsp;</div>
 <h3>Think Time Frequency Distribution</h3>
 <div id="tt_chart"></div>
